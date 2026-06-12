@@ -118,6 +118,13 @@ type statusInput struct {
 }
 
 func cmdStatus(dir string) {
+	// self-cleanup: if the plugin has been uninstalled, the orphaned statusLine in the
+	// user's settings would otherwise keep rendering. Remove (or restore) it and print nothing.
+	if !pluginInstalled() {
+		deregister(dir)
+		return
+	}
+
 	raw, _ := io.ReadAll(os.Stdin)
 	var in statusInput
 	json.Unmarshal(raw, &in)
@@ -219,6 +226,63 @@ func runWrapped(cmdStr string, stdin []byte) string {
 	c.Stdin = bytes.NewReader(stdin)
 	out, _ := c.Output()
 	return strings.TrimRight(string(out), "\n")
+}
+
+// pluginInstalled reports whether the adtention plugin is still installed. On any read or
+// parse failure it returns true (fail safe: never self-remove when we cannot be sure).
+func pluginInstalled() bool {
+	p := filepath.Join(home(), ".claude", "plugins", "installed_plugins.json")
+	b, err := os.ReadFile(p)
+	if err != nil {
+		return true
+	}
+	var d struct {
+		Plugins map[string]any `json:"plugins"`
+	}
+	if json.Unmarshal(b, &d) != nil {
+		return true
+	}
+	for k := range d.Plugins {
+		if strings.Contains(k, "adtention") {
+			return true
+		}
+	}
+	return false
+}
+
+// deregister removes our statusLine from the user's settings (restoring a wrapped one if we
+// saved it), but only if the current statusLine is actually ours.
+func deregister(dir string) {
+	settingsPath := filepath.Join(home(), ".claude", "settings.json")
+	b, err := os.ReadFile(settingsPath)
+	if err != nil {
+		return
+	}
+	var settings map[string]any
+	if json.Unmarshal(b, &settings) != nil {
+		return
+	}
+	sl, ok := settings["statusLine"].(map[string]any)
+	if !ok {
+		return
+	}
+	cmd, _ := sl["command"].(string)
+	if !strings.Contains(cmd, "adtention") && !strings.Contains(cmd, "adline") {
+		return // someone else's statusLine now; leave it
+	}
+	if pb, err := os.ReadFile(filepath.Join(dir, "prev_statusline.json")); err == nil {
+		var prev any
+		if json.Unmarshal(pb, &prev) == nil && prev != nil {
+			settings["statusLine"] = prev // restore the user's original
+		} else {
+			delete(settings, "statusLine")
+		}
+	} else {
+		delete(settings, "statusLine")
+	}
+	if out, err := json.MarshalIndent(settings, "", "  "); err == nil {
+		os.WriteFile(settingsPath, out, 0o644)
+	}
 }
 
 // ---------- prompt: the UserPromptSubmit hook (silent, detached) ----------
