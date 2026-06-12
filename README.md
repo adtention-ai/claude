@@ -43,8 +43,8 @@ No account. No email. No login. The install ID is a random string created locall
 time the plugin runs. You only attach an email or wallet **later**, if and when you decide
 to cash out.
 
-**Don't take our word for it.** The entire plugin is four short shell scripts in
-[`bin/`](bin/). The status line script makes *zero* network calls. It only reads a cached
+**Don't take our word for it.** The entire client is one short Go program
+([`src/main.go`](src/main.go)) that you can read and build yourself. The status line command makes *zero* network calls. It only reads a cached
 file and prints. The single outbound request lives in one hook, and you can read exactly
 what it sends. Twenty minutes with the source and you'll know more about it than you do
 about most of your dependencies.
@@ -75,7 +75,7 @@ On first run it adds its status line to your `~/.claude/settings.json`. **Alread
 custom status line?** It keeps yours and shows the sponsor line beside it or on a second
 row when the terminal is narrow. Your original is saved to `~/.claude/adtention/prev_statusline.json` so you can always put it back.
 
-Needs `jq`. Local state lives in `~/.claude/adtention/` (set `$ADTENTION_CACHE` to move it).
+Ships as a single static binary (no runtime dependencies). Local state lives in `~/.claude/adtention/` (set `$ADTENTION_CACHE` to move it).
 
 On a narrow terminal it drops the least useful parts first and always keeps your balance and
 the sponsor line.
@@ -137,8 +137,8 @@ provide a payout detail if and when you decide to withdraw.
 
 **How do I know my code isn't being harvested?**
 Because the categorization runs locally and only emits one of six bucket words. The plugin
-is four readable shell scripts — read [`bin/`](bin/) and confirm it yourself. The status
-line script has no network access at all.
+is one readable Go file ([`src/main.go`](src/main.go)) that you can build yourself. The status
+line command has no network access at all.
 
 **What if I hate it?**
 One command to uninstall, and your previous status line is restored from the backup file.
