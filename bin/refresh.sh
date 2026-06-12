@@ -12,7 +12,7 @@ set -uo pipefail
 CACHE_DIR="${ADTENTION_CACHE:-$HOME/.claude/adtention}"
 # one-time migration from the old default cache dir (pre-rename), preserving identity/balance
 [ "$CACHE_DIR" = "$HOME/.claude/adtention" ] && [ -d "$HOME/.claude/adline" ] && [ ! -e "$CACHE_DIR" ] && mv "$HOME/.claude/adline" "$CACHE_DIR" 2>/dev/null
-API="${ADTENTION_API:-https://adline-server.len-525.workers.dev}"
+API="${ADTENTION_API:-https://api.adtention.ai}"
 mkdir -p "$CACHE_DIR"
 
 # portable mtime (BSD stat -f, GNU stat -c)
