@@ -1,0 +1,6 @@
+{
+  "name": "adtention",
+  "version": "0.1.1",
+  "description": "Ad-supported status line for Claude Code: a genuinely useful dev status line (model, context %, weekly limit) plus one sponsor slot, targeted locally by category. Devs earn credit per impression; only a category tag ever leaves the machine.",
+  "author": { "name": "Len Seitter" }
+}

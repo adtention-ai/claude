@@ -1,0 +1,13 @@
+{
+  "name": "adtention",
+  "owner": {
+    "name": "Len Seitter"
+  },
+  "plugins": [
+    {
+      "name": "adtention",
+      "source": "./",
+      "description": "Ad-supported status line for Claude Code: a useful dev status line (model, context %, weekly limit) plus one sponsor slot, targeted locally by category. Earn credit per impression. Only a category tag ever leaves your machine."
+    }
+  ]
+}

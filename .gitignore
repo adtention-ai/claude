@@ -1,0 +1,5 @@
+# runtime cache / local state — never commit
+*.log
+.DS_Store
+
+# the runtime cache lives at $ADTENTION_CACHE (default ~/.claude/adtention), outside the repo
