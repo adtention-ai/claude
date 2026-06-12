@@ -3,14 +3,14 @@
     "SessionStart": [
       {
         "hooks": [
-          { "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/bin/setup.sh" }
+          { "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/bin/adtention setup" }
         ]
       }
     ],
     "UserPromptSubmit": [
       {
         "hooks": [
-          { "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/bin/on-prompt.sh" }
+          { "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/bin/adtention prompt" }
         ]
       }
     ]
