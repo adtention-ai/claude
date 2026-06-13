@@ -19,6 +19,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"sort"
 	"strings"
 	"syscall"
@@ -34,6 +35,12 @@ const (
 var categories = []string{"web3", "web", "devops", "data", "systems", "general"}
 
 var ansiRe = regexp.MustCompile(`\x1b\[[0-9;]*m`)
+
+// adTailRe matches a trailing " → domain" in ad copy. Stripped at render time: the visible
+// domain is display-only (and not clickable in most terminals), and the real destination is
+// the cached click URL behind /info. Leaving it out of the stored copy keeps old clients,
+// which render the text verbatim, working unchanged.
+var adTailRe = regexp.MustCompile(` → \S+$`)
 
 // version is stamped at build time via -ldflags "-X main.version=...".
 // Defaults to "dev" for local/unstamped builds.
@@ -61,6 +68,8 @@ func main() {
 		cmdRefresh(dir)
 	case "setup":
 		cmdSetup(dir)
+	case "open":
+		cmdOpen(dir)
 	}
 }
 
@@ -163,13 +172,17 @@ func cmdStatus(dir string) {
 		slotW = len([]rune(balseg))
 	}
 	if ad != "" {
-		piece := fmt.Sprintf("\x1b[36m%s\x1b[0m", ad)
+		// pitch only (drop the display domain), then a dim "→ /info" call to action.
+		pitch := adTailRe.ReplaceAllString(ad, "")
+		cta := " → /info"
+		piece := fmt.Sprintf("\x1b[36m%s\x1b[0m\x1b[2m%s\x1b[0m", pitch, cta)
+		w := len([]rune(pitch)) + len([]rune(cta))
 		if slot != "" {
 			slot += "  " + piece
-			slotW += 2 + len([]rune(ad))
+			slotW += 2 + w
 		} else {
 			slot = piece
-			slotW = len([]rune(ad))
+			slotW = w
 		}
 	}
 	gap := 0
@@ -317,6 +330,38 @@ func cmdPrompt(dir string) {
 	// do not Wait: fire and forget. Print nothing (stdout is injected into the prompt).
 }
 
+// cmdOpen opens the current sponsor's click URL in the browser. It is invoked by the
+// /adtention:sponsor command (a !`...` shell call in the command file), so it runs as its
+// own short-lived process: launch the browser, print one line. The click URL was cached by
+// the last refresh and 302-redirects through the server, so the click is attributable.
+func cmdOpen(dir string) {
+	click := readFile(filepath.Join(dir, "current_click.txt"))
+	if click == "" {
+		fmt.Println("adtention: no sponsor to open yet. Send a prompt first, then try again.")
+		return
+	}
+	url := click
+	if strings.HasPrefix(url, "/") {
+		url = apiURL() + url
+	}
+	openURL(url)
+	fmt.Println("adtention: opened the current sponsor in your browser.")
+}
+
+// openURL launches the default browser for u (best effort; errors are ignored).
+func openURL(u string) {
+	var c *exec.Cmd
+	switch runtime.GOOS {
+	case "darwin":
+		c = exec.Command("open", u)
+	case "windows":
+		c = exec.Command("rundll32", "url.dll,FileProtocolHandler", u)
+	default:
+		c = exec.Command("xdg-open", u)
+	}
+	c.Run() // wait: the opener hands off quickly, and we os.Exit right after
+}
+
 // ---------- refresh: classify locally, call the API, write the cache ----------
 
 func cmdRefresh(dir string) {
@@ -383,18 +428,29 @@ func cmdRefresh(dir string) {
 	var r struct {
 		Text       string  `json:"text"`
 		BalanceUSD float64 `json:"balance_usd"`
+		ClickURL   string  `json:"click_url"`
+		ImpID      string  `json:"impression_id"`
 	}
 	json.Unmarshal([]byte(resp), &r)
+
+	// click target for /sponsor (and OSC 8 links). Server returns click_url on a fresh
+	// serve; on a dedup it only returns impression_id, so derive it then.
+	click := r.ClickURL
+	if click == "" && r.ImpID != "" {
+		click = "/v1/click/" + r.ImpID
+	}
 
 	if strings.Contains(resp, "balance_usd") {
 		writeFile(filepath.Join(dir, "balance"), fmt.Sprintf("%.5f", r.BalanceUSD))
 		writeFile(filepath.Join(dir, "balance_display"), fmt.Sprintf("⊕ $%.2f", r.BalanceUSD))
 	}
 	if r.Text == "" {
-		writeFile(filepath.Join(dir, "current_ad.txt"), "") // no inventory: clear the slot
+		writeFile(filepath.Join(dir, "current_ad.txt"), "")   // no inventory: clear the slot
+		writeFile(filepath.Join(dir, "current_click.txt"), "") // and its click target
 		return
 	}
 	writeFile(filepath.Join(dir, "current_ad.txt"), r.Text)
+	writeFile(filepath.Join(dir, "current_click.txt"), click)
 	writeFile(filepath.Join(dir, "category.txt"), category)
 	writeFile(filepath.Join(dir, "source.txt"), source)
 	appendFile(filepath.Join(dir, "impressions.log"),
