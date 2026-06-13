@@ -23,7 +23,7 @@ docker run --rm --platform linux/amd64 -e V="$VERSION" -v "$PWD":/w -w /w golang
   for pair in darwin/amd64 darwin/arm64 linux/amd64 linux/arm64; do
     os=${pair%/*}; arch=${pair#*/}
     CGO_ENABLED=0 GOOS=$os GOARCH=$arch \
-      go build -C src -trimpath -ldflags "-s -w -X main.version=$V" \
+      go build -C src -trimpath -buildvcs=false -ldflags "-s -w -X main.version=$V" \
       -o "../bin/adtention-$os-$arch" .
     echo "  built adtention-$os-$arch"
   done
