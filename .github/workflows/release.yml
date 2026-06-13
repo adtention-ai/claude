@@ -17,10 +17,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-go@v5
-        with:
-          go-version: '1.21.8'
-
       - name: Tag must match plugin.json version
         run: |
           PLUGIN_V="v$(grep '"version"' .claude-plugin/plugin.json | head -1 \

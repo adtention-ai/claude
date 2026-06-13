@@ -1,8 +1,8 @@
 name: ci
 
-# Reproducibility gate: rebuild the client from source and prove the committed
-# bin/ binaries match byte-for-byte. This is the audit-trust guarantee, anyone
-# can confirm the shipped binary corresponds to the public source.
+# Reproducibility gate: rebuild the client from source in the SAME pinned environment as
+# build.sh (golang:1.21.8 container) and prove the committed bin/ matches byte-for-byte.
+# Pinning the container, not just the Go version, is what makes the output host-independent.
 on:
   push:
     branches: [main]
@@ -14,21 +14,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-go@v5
-        with:
-          # Pinned exactly: reproducible output depends on the toolchain version.
-          go-version: '1.21.8'
-
-      - name: go vet
-        working-directory: src
-        run: go vet ./...
+      - name: go vet (pinned toolchain)
+        run: docker run --rm -v "$PWD":/w -w /w/src golang:1.21.8 go vet ./...
 
       - name: Committed binaries match a fresh reproducible build
         run: |
           ./build.sh
           if ! git diff --quiet -- bin/; then
-            echo "::error::bin/ does not match a fresh build from src/. Run ./build.sh and commit the result."
+            echo "::error::bin/ does not match a fresh reproducible build. Run ./build.sh and commit the result."
             git diff --stat -- bin/
             exit 1
           fi
-          echo "bin/ matches a fresh build, and SHA256SUMS is current."
+          echo "bin/ matches a fresh reproducible build, and SHA256SUMS is current."
