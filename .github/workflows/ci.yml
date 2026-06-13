@@ -15,7 +15,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: go vet (pinned toolchain)
-        run: docker run --rm -v "$PWD":/w -w /w/src golang:1.21.8 go vet ./...
+        run: docker run --rm --platform linux/amd64 -v "$PWD":/w -w /w/src golang:1.21.8 go vet ./...
 
       - name: Committed binaries match a fresh reproducible build
         run: |

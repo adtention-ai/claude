@@ -16,7 +16,10 @@ VERSION="v$(grep '"version"' .claude-plugin/plugin.json | head -1 \
   | sed -E 's/.*"version"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/')"
 echo "Building adtention $VERSION in golang:1.21.8 (reproducible)"
 
-docker run --rm -e V="$VERSION" -v "$PWD":/w -w /w golang:1.21.8 sh -euc '
+# --platform pins the builder arch too: the Go build-id leaks the toolchain's arch, so an
+# arm64 container and an amd64 container produce different bytes. linux/amd64 matches CI
+# (on Apple Silicon this runs emulated, slower but byte-identical to CI).
+docker run --rm --platform linux/amd64 -e V="$VERSION" -v "$PWD":/w -w /w golang:1.21.8 sh -euc '
   for pair in darwin/amd64 darwin/arm64 linux/amd64 linux/arm64; do
     os=${pair%/*}; arch=${pair#*/}
     CGO_ENABLED=0 GOOS=$os GOARCH=$arch \
