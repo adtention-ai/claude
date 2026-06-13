@@ -35,8 +35,17 @@ var categories = []string{"web3", "web", "devops", "data", "systems", "general"}
 
 var ansiRe = regexp.MustCompile(`\x1b\[[0-9;]*m`)
 
+// version is stamped at build time via -ldflags "-X main.version=...".
+// Defaults to "dev" for local/unstamped builds.
+var version = "dev"
+
 func main() {
 	if len(os.Args) < 2 {
+		return
+	}
+	switch os.Args[1] {
+	case "version", "--version", "-v":
+		fmt.Println(version)
 		return
 	}
 	dir := cacheDir()

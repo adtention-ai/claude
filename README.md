@@ -109,6 +109,32 @@ machine entirely.
 
 ---
 
+## Verify the binary
+
+You should never have to trust a binary someone built by hand. The four binaries in
+`bin/` are built reproducibly by CI straight from the source in `src/`, and every push
+runs a check that rebuilds them and fails if they do not match the public source. A
+tampered binary cannot land on `main`.
+
+To check the copy you have, from its `bin/` directory:
+
+```
+shasum -a 256 -c SHA256SUMS
+```
+
+To go further, rebuild from source and confirm it matches byte for byte (needs Go 1.21):
+
+```
+git clone https://github.com/adtention-ai/claude && cd claude
+./build.sh
+git diff --quiet -- bin/ && echo "matches the published binaries"
+```
+
+You can also see the version of the binary you have with `bin/adtention version`. Tagged
+releases attach the same binaries and `SHA256SUMS`.
+
+---
+
 ## Uninstall
 
 ```
