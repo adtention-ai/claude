@@ -395,7 +395,11 @@ func cmdRefresh(dir string) {
 	idFile := filepath.Join(dir, "identity.json")
 	pub := readPublisher(idFile)
 	if pub == "" {
-		pub = registerAndSave(api, idFile)
+		ref := readRefCode(dir)
+		pub = registerAndSave(api, idFile, ref)
+		if pub != "" {
+			os.Remove(filepath.Join(dir, "ref")) // one-shot: consume the invite, never re-attribute
+		}
 	}
 	if pub == "" {
 		return // server unreachable and no identity
@@ -416,7 +420,7 @@ func cmdRefresh(dir string) {
 	nonce := fmt.Sprintf("%d-%s", now, randHex(4))
 	resp := serve(api, pub, category, nonce)
 	if strings.Contains(resp, "unknown_publisher") {
-		pub = registerAndSave(api, idFile) // self-heal
+		pub = registerAndSave(api, idFile, "") // self-heal: re-register, no re-attribution
 		if pub != "" {
 			resp = serve(api, pub, category, nonce+"-r")
 		}
@@ -484,17 +488,46 @@ func readPublisher(idFile string) string {
 	return id.PublisherID
 }
 
-func registerAndSave(api, idFile string) string {
-	body := post(api+"/v1/register", "")
-	if body == "" {
+func registerAndSave(api, idFile, ref string) string {
+	body := ""
+	if ref != "" {
+		body = fmt.Sprintf(`{"ref":%q}`, ref) // attribute this install to the referrer
+	}
+	resp := post(api+"/v1/register", body)
+	if resp == "" {
 		return ""
 	}
-	os.WriteFile(idFile, []byte(body), 0o600)
+	// identity.json holds the whole register response (publisher_id, secret, referral_code)
+	os.WriteFile(idFile, []byte(resp), 0o600)
 	var id struct {
 		PublisherID string `json:"publisher_id"`
 	}
-	json.Unmarshal([]byte(body), &id)
+	json.Unmarshal([]byte(resp), &id)
 	return id.PublisherID
+}
+
+// referral attribution: a code from $ADTENTION_REF, else the one-shot <cache>/ref file (written
+// by the deep-link landing's prep step), rides the FIRST register only. Sanitized to the code
+// alphabet so nothing untrusted reaches the request body.
+func readRefCode(dir string) string {
+	if v := os.Getenv("ADTENTION_REF"); v != "" {
+		return sanitizeRef(v)
+	}
+	return sanitizeRef(readFile(filepath.Join(dir, "ref")))
+}
+
+func sanitizeRef(s string) string {
+	s = strings.ToLower(s)
+	var b strings.Builder
+	for _, r := range s {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			b.WriteByte(byte(r))
+			if b.Len() >= 32 {
+				break
+			}
+		}
+	}
+	return b.String()
 }
 
 func serve(api, pub, category, nonce string) string {
