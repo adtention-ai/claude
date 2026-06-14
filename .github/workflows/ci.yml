@@ -12,7 +12,7 @@ jobs:
   verify:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: go vet (pinned toolchain)
         run: docker run --rm --platform linux/amd64 -v "$PWD":/w -w /w/src golang:1.21.8 go vet ./...
