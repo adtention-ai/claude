@@ -29,6 +29,7 @@ import (
 const (
 	defaultAPI = "https://api.adtention.ai"
 	minDwellS  = 15
+	renderTTLs = 300 // statusLine re-renders ~every 10s in a live terminal; only bill if it rendered within this window
 	dailyNote  = "" // server enforces the daily cap
 )
 
@@ -119,10 +120,45 @@ func visWidth(s string) int {
 	return len([]rune(ansiRe.ReplaceAllString(s, "")))
 }
 
+// renderPath is the per-session render-heartbeat file. Keyed by session_id so a terminal
+// session can't make a concurrent app session (same shared cache dir) look "rendered".
+// Falls back to a shared key when session_id is absent (older hosts): degrades to
+// per-machine, never over-gates.
+func renderPath(dir, sessionID string) string {
+	key := sanitizeKey(sessionID)
+	if key == "" {
+		key = "shared"
+	}
+	return filepath.Join(dir, "render_"+key)
+}
+
+// sanitizeKey keeps only filename-safe chars (session_id is a uuid, but be defensive).
+func sanitizeKey(s string) string {
+	return strings.Map(func(r rune) rune {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '-', r == '_':
+			return r
+		}
+		return -1
+	}, s)
+}
+
+// pruneRenders deletes per-session heartbeats from long-dead sessions so they don't pile up.
+func pruneRenders(dir string) {
+	matches, _ := filepath.Glob(filepath.Join(dir, "render_*"))
+	cutoff := time.Now().Add(-24 * time.Hour)
+	for _, p := range matches {
+		if fi, err := os.Stat(p); err == nil && fi.ModTime().Before(cutoff) {
+			os.Remove(p)
+		}
+	}
+}
+
 // ---------- status: the render path ----------
 
 type statusInput struct {
-	Model struct {
+	SessionID string `json:"session_id"`
+	Model     struct {
 		DisplayName string `json:"display_name"`
 	} `json:"model"`
 	ContextWindow struct {
@@ -146,6 +182,14 @@ func cmdStatus(dir string) {
 	raw, _ := io.ReadAll(os.Stdin)
 	var in statusInput
 	json.Unmarshal(raw, &in)
+
+	// Render heartbeat, keyed by session: reaching here means the host actually renders our
+	// statusLine for THIS session (terminal Claude Code). Surfaces that run our hooks but show
+	// no statusLine (e.g. the Claude desktop app) never invoke status, so their session never
+	// writes this, and refresh refuses to bill an impression for an ad that was never on screen.
+	// Per-session (not per-machine) so a terminal session can't make a concurrent app session
+	// in the same shared cache dir look "rendered".
+	writeFile(renderPath(dir, in.SessionID), fmt.Sprintf("%d", time.Now().Unix()))
 
 	model := in.Model.DisplayName
 	if model == "" {
@@ -314,6 +358,7 @@ func cmdPrompt(dir string) {
 	var in struct {
 		Cwd            string `json:"cwd"`
 		TranscriptPath string `json:"transcript_path"`
+		SessionID      string `json:"session_id"`
 	}
 	json.Unmarshal(raw, &in)
 	cwd := in.Cwd
@@ -324,7 +369,8 @@ func cmdPrompt(dir string) {
 	if err != nil {
 		return
 	}
-	c := exec.Command(self, "refresh", cwd, in.TranscriptPath)
+	// pass session_id so refresh can check this session's render heartbeat (see cmdStatus)
+	c := exec.Command(self, "refresh", cwd, in.TranscriptPath, in.SessionID)
 	c.SysProcAttr = &syscall.SysProcAttr{Setsid: true} // detach
 	c.Start()
 	// do not Wait: fire and forget. Print nothing (stdout is injected into the prompt).
@@ -365,12 +411,15 @@ func openURL(u string) {
 // ---------- refresh: classify locally, call the API, write the cache ----------
 
 func cmdRefresh(dir string) {
-	cwd, transcript := "", ""
+	cwd, transcript, sessionID := "", "", ""
 	if len(os.Args) > 2 {
 		cwd = os.Args[2]
 	}
 	if len(os.Args) > 3 {
 		transcript = os.Args[3]
+	}
+	if len(os.Args) > 4 {
+		sessionID = os.Args[4]
 	}
 	if cwd == "" {
 		cwd, _ = os.Getwd()
@@ -387,6 +436,21 @@ func cmdRefresh(dir string) {
 		return
 	}
 	defer os.Remove(lock)
+
+	// Bill only for ads actually on screen. status writes a render heartbeat for its session
+	// whenever our statusLine is drawn; if THIS session's heartbeat is missing or stale, the
+	// host runs our hooks but shows no statusLine (e.g. the Claude desktop app), so we must
+	// not register or record an impression nobody saw.
+	pruneRenders(dir)
+	if r := readFile(renderPath(dir, sessionID)); r == "" {
+		return
+	} else {
+		var ts int64
+		fmt.Sscanf(r, "%d", &ts)
+		if time.Now().Unix()-ts >= renderTTLs {
+			return
+		}
+	}
 
 	category, source := classify(cwd, transcript)
 	api := apiURL()
