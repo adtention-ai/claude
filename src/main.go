@@ -1,10 +1,11 @@
 // adtention client. One static binary, no runtime deps (replaces the bash + jq scripts).
 //
 // Subcommands (wired by the plugin):
-//   status   statusLine command. Reads cache, prints the line. Never hits the network.
-//   prompt   UserPromptSubmit hook. Silent. Spawns a detached `refresh`.
-//   refresh  background worker. Classifies locally, calls the API, writes the cache.
-//   setup    SessionStart hook. Installs the statusLine into the user's settings.
+//
+//	status   statusLine command. Reads cache, prints the line. Never hits the network.
+//	prompt   UserPromptSubmit hook. Silent. Spawns a detached `refresh`.
+//	refresh  background worker. Classifies locally, calls the API, writes the cache.
+//	setup    SessionStart hook. Installs the statusLine into the user's settings.
 package main
 
 import (
@@ -20,7 +21,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
-	"sort"
 	"strings"
 	"syscall"
 	"time"
@@ -30,12 +30,19 @@ const (
 	defaultAPI = "https://api.adtention.ai"
 	minDwellS  = 15
 	renderTTLs = 300 // statusLine re-renders ~every 10s in a live terminal; only bill if it rendered within this window
-	dailyNote  = "" // server enforces the daily cap
+	dailyNote  = ""  // server enforces the daily cap
 )
 
 var categories = []string{"web3", "web", "devops", "data", "systems", "general"}
 
 var ansiRe = regexp.MustCompile(`\x1b\[[0-9;]*m`)
+
+// ctrlRe matches every C0 control byte (incl. ESC, tab, newline) and DEL. Server-supplied ad
+// copy is single-line plain text, so stripping these neutralizes terminal escape injection on
+// render and keeps tabs/newlines out of the TSV impressions log.
+var ctrlRe = regexp.MustCompile(`[\x00-\x1f\x7f]`)
+
+func sanitizeAd(s string) string { return strings.TrimSpace(ctrlRe.ReplaceAllString(s, "")) }
 
 // adTailRe matches a trailing " → domain" in ad copy. Stripped at render time: the visible
 // domain is display-only (and not clickable in most terminals), and the real destination is
@@ -114,7 +121,33 @@ func readFile(p string) string {
 	return strings.TrimRight(string(b), "\n")
 }
 
-func writeFile(p, s string) { os.WriteFile(p, []byte(s), 0o644) }
+func writeFile(p, s string) { atomicWrite(p, []byte(s)) }
+
+// atomicWrite writes b to p via a temp file + rename so a reader never sees a partial file and a
+// crash can't truncate the target. The temp lives in the same dir (rename is atomic only within a
+// filesystem); CreateTemp gives 0600 and the rename replaces a pre-existing symlink rather than
+// writing through it. Falls back to a direct write if the temp can't be created.
+func atomicWrite(p string, b []byte) error {
+	f, err := os.CreateTemp(filepath.Dir(p), ".tmp-*")
+	if err != nil {
+		return os.WriteFile(p, b, 0o600)
+	}
+	tmp := f.Name()
+	if _, err := f.Write(b); err != nil {
+		f.Close()
+		os.Remove(tmp)
+		return err
+	}
+	if err := f.Close(); err != nil {
+		os.Remove(tmp)
+		return err
+	}
+	if err := os.Rename(tmp, p); err != nil {
+		os.Remove(tmp)
+		return err
+	}
+	return nil
+}
 
 func visWidth(s string) int {
 	return len([]rune(ansiRe.ReplaceAllString(s, "")))
@@ -199,8 +232,10 @@ func cmdStatus(dir string) {
 		model = model[:i]
 	}
 
-	ad := readFile(filepath.Join(dir, "current_ad.txt"))
-	balseg := readFile(filepath.Join(dir, "balance_display"))
+	// Sanitize on read too: the cache file is an untrusted boundary (it could be tampered with, or
+	// written by an older client), so never let stored bytes emit escape sequences to the terminal.
+	ad := sanitizeAd(readFile(filepath.Join(dir, "current_ad.txt")))
+	balseg := sanitizeAd(readFile(filepath.Join(dir, "balance_display")))
 
 	cols := 80
 	if c := os.Getenv("COLUMNS"); c != "" {
@@ -347,7 +382,7 @@ func deregister(dir string) {
 		delete(settings, "statusLine")
 	}
 	if out, err := json.MarshalIndent(settings, "", "  "); err == nil {
-		os.WriteFile(settingsPath, out, 0o644)
+		atomicWrite(settingsPath, out)
 	}
 }
 
@@ -388,7 +423,13 @@ func cmdOpen(dir string) {
 	}
 	url := click
 	if strings.HasPrefix(url, "/") {
-		url = apiURL() + url
+		url = apiURL() + url // server-relative path → our API host (https)
+	}
+	// Only hand http(s) URLs to the OS opener. A server (or MITM, or ADTENTION_API override) must
+	// not be able to launch file://, smb://, or a custom protocol handler.
+	if !strings.HasPrefix(url, "https://") && !strings.HasPrefix(url, "http://") {
+		fmt.Println("adtention: refusing to open a non-web sponsor link.")
+		return
 	}
 	openURL(url)
 	fmt.Println("adtention: opened the current sponsor in your browser.")
@@ -501,9 +542,14 @@ func cmdRefresh(dir string) {
 	}
 	json.Unmarshal([]byte(resp), &r)
 
+	// Server content is untrusted at the terminal boundary: strip control bytes from the ad copy
+	// before it is ever cached, rendered, or written to the TSV log (no escape injection, no
+	// tab/newline log injection).
+	r.Text = sanitizeAd(r.Text)
+
 	// click target for /sponsor (and OSC 8 links). Server returns click_url on a fresh
 	// serve; on a dedup it only returns impression_id, so derive it then.
-	click := r.ClickURL
+	click := sanitizeAd(r.ClickURL)
 	if click == "" && r.ImpID != "" {
 		click = "/v1/click/" + r.ImpID
 	}
@@ -513,7 +559,7 @@ func cmdRefresh(dir string) {
 		writeFile(filepath.Join(dir, "balance_display"), fmt.Sprintf("⊕ $%.2f", r.BalanceUSD))
 	}
 	if r.Text == "" {
-		writeFile(filepath.Join(dir, "current_ad.txt"), "")   // no inventory: clear the slot
+		writeFile(filepath.Join(dir, "current_ad.txt"), "")    // no inventory: clear the slot
 		writeFile(filepath.Join(dir, "current_click.txt"), "") // and its click target
 		return
 	}
@@ -526,7 +572,7 @@ func cmdRefresh(dir string) {
 }
 
 func appendFile(p, s string) {
-	f, err := os.OpenFile(p, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	f, err := os.OpenFile(p, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
 		return
 	}
@@ -664,17 +710,20 @@ func classifyTopic(path string) string {
 	}
 	text := strings.ToLower(strings.Join(lines, "\n"))
 
-	type sc struct {
-		cat string
-		n   int
+	// Iterate categories in fixed order and keep the first strict max, so equal scores tie-break
+	// deterministically (map iteration order is random; the old sort over a map was non-stable).
+	best, bestN := "", 0
+	for _, cat := range categories {
+		re := topicPatterns[cat]
+		if re == nil {
+			continue
+		}
+		if n := len(re.FindAllString(text, -1)); n > bestN {
+			best, bestN = cat, n
+		}
 	}
-	scores := []sc{}
-	for cat, re := range topicPatterns {
-		scores = append(scores, sc{cat, len(re.FindAllString(text, -1))})
-	}
-	sort.Slice(scores, func(i, j int) bool { return scores[i].n > scores[j].n })
-	if len(scores) > 0 && scores[0].n >= 3 {
-		return scores[0].cat
+	if bestN >= 3 {
+		return best
 	}
 	return ""
 }
@@ -695,15 +744,24 @@ func cmdSetup(dir string) {
 		}
 	}
 	self, _ := os.Executable()
-	cmdLine := fmt.Sprintf("%q status", self)
+	target := self
 	if root != "" {
-		cmdLine = fmt.Sprintf("%q status", filepath.Join(root, "bin", "adtention"))
+		target = filepath.Join(root, "bin", "adtention")
 	}
+	// Single-quote the path: the host runs this statusLine command through a shell, and Go's %q
+	// emits a double-quoted string in which $(...), backticks, and $VAR still expand. A single-
+	// quoted path can't, so a path containing shell metacharacters stays inert.
+	cmdLine := shQuote(target) + " status"
 
 	settingsPath := filepath.Join(home(), ".claude", "settings.json")
 	var settings map[string]any
 	if b, err := os.ReadFile(settingsPath); err == nil {
-		json.Unmarshal(b, &settings)
+		// If the file exists but is malformed JSON, do NOT proceed: writing back would replace the
+		// user's entire settings (permissions, env, model, hooks, MCP servers) with just our
+		// statusLine. Bail and leave the file untouched. (deregister already guards the same way.)
+		if json.Unmarshal(b, &settings) != nil {
+			return
+		}
 	}
 	if settings == nil {
 		settings = map[string]any{}
@@ -740,6 +798,12 @@ func cmdSetup(dir string) {
 		"refreshInterval": 10,
 	}
 	if b, err := json.MarshalIndent(settings, "", "  "); err == nil {
-		os.WriteFile(settingsPath, b, 0o644)
+		atomicWrite(settingsPath, b)
 	}
+}
+
+// shQuote wraps s in single quotes for safe use in a POSIX shell command, escaping any embedded
+// single quote as '\”. Nothing inside single quotes is expanded by the shell.
+func shQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }

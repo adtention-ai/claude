@@ -29,8 +29,9 @@ of six broad buckets — all of it on your machine, no network call:
 
 `web3` · `web` · `devops` · `data` · `systems` · `general`
 
-The **only** thing that ever goes to the server is that one word, plus an anonymous random
-install ID so it can pick a relevant sponsor and credit your balance.
+The **only** thing that ever goes to the server is that one word, plus a random install ID
+(a pseudonym, not tied to any personal data) so it can pick a relevant sponsor and credit your
+balance.
 
 | Leaves your machine | Never leaves your machine |
 |---|---|
@@ -158,8 +159,8 @@ interruptions, nothing to click. When space is tight it shrinks before it ever c
 status info.
 
 **Do I need to sign up or hand over an email?**
-No. There's no account and no login. An anonymous install ID is generated locally. You only
-provide a payout detail if and when you decide to withdraw.
+No. There's no account and no login. A random install ID (a pseudonym, carrying no personal
+data) is generated locally. You only provide a payout detail if and when you decide to withdraw.
 
 **How do I know my code isn't being harvested?**
 Because the categorization runs locally and only emits one of six bucket words. The plugin

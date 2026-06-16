@@ -29,7 +29,10 @@ docker run --rm --platform linux/amd64 -e V="$VERSION" -v "$PWD":/w -w /w golang
   done
   # Fixed ordering keeps SHA256SUMS itself deterministic. sha256sum (Linux) and
   # shasum -a 256 (macOS) produce the same "hash  name" format for verification.
+  # The launcher (adtention) is committed, not built here, but is checksummed too so a third
+  # party verifying a download catches a swapped launcher, not just swapped binaries.
   cd bin && sha256sum \
+    adtention \
     adtention-darwin-amd64 \
     adtention-darwin-arm64 \
     adtention-linux-amd64 \
