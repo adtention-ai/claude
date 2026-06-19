@@ -478,25 +478,16 @@ func cmdRefresh(dir string) {
 	}
 	defer os.Remove(lock)
 
-	// Bill only for ads actually on screen. status writes a render heartbeat for its session
-	// whenever our statusLine is drawn; if THIS session's heartbeat is missing or stale, the
-	// host runs our hooks but shows no statusLine (e.g. the Claude desktop app), so we must
-	// not register or record an impression nobody saw.
 	pruneRenders(dir)
-	if r := readFile(renderPath(dir, sessionID)); r == "" {
-		return
-	} else {
-		var ts int64
-		fmt.Sscanf(r, "%d", &ts)
-		if time.Now().Unix()-ts >= renderTTLs {
-			return
-		}
-	}
-
-	category, source := classify(cwd, transcript)
 	api := apiURL()
 
-	// identity: register once
+	// Identity registration is one-time and NON-BILLABLE, so it runs BEFORE the render gate.
+	// The gate below exists only to suppress BILLING for impressions nobody saw (e.g. the Claude
+	// desktop app runs our hooks but renders no statusLine). Registration records no impression
+	// and bills nothing, so gating it only causes harm: a user whose statusLine hasn't rendered
+	// at the instant refresh runs (first-prompt race, a >TTL idle gap, a brief desktop visit)
+	// would otherwise never get an identity and never appear as a publisher. Register first; gate
+	// only the serve.
 	idFile := filepath.Join(dir, "identity.json")
 	pub := readPublisher(idFile)
 	if pub == "" {
@@ -509,6 +500,22 @@ func cmdRefresh(dir string) {
 	if pub == "" {
 		return // server unreachable and no identity
 	}
+
+	// Bill only for ads actually on screen. status writes a render heartbeat for its session
+	// whenever our statusLine is drawn; if THIS session's heartbeat is missing or stale, the host
+	// runs our hooks but shows no statusLine (e.g. the Claude desktop app), so we must not serve
+	// or record an impression nobody saw. (Registration above is exempt: it bills nothing.)
+	if r := readFile(renderPath(dir, sessionID)); r == "" {
+		return
+	} else {
+		var ts int64
+		fmt.Sscanf(r, "%d", &ts)
+		if time.Now().Unix()-ts >= renderTTLs {
+			return
+		}
+	}
+
+	category, source := classify(cwd, transcript)
 
 	// dwell / frequency cap
 	last := readFile(filepath.Join(dir, "last_serve"))
