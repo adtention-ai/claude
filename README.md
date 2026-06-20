@@ -1,4 +1,4 @@
-# ADtention
+# ADtention for Claude Code
 
 **The Claude Code status line that pays you to code.**
 
