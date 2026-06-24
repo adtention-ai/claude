@@ -54,6 +54,10 @@ var adTailRe = regexp.MustCompile(` → \S+$`)
 // Defaults to "dev" for local/unstamped builds.
 var version = "dev"
 
+// clientTag identifies the originating tool to the server (stamped on the publisher at
+// register and on every impression at serve). The server sanitizes it to a slug.
+const clientTag = "claude-code"
+
 func main() {
 	if len(os.Args) < 2 {
 		return
@@ -606,9 +610,9 @@ func readPublisher(idFile string) string {
 }
 
 func registerAndSave(api, idFile, ref string) string {
-	body := ""
+	body := fmt.Sprintf(`{"client":%q}`, clientTag) // owning tool for this publisher
 	if ref != "" {
-		body = fmt.Sprintf(`{"ref":%q}`, ref) // attribute this install to the referrer
+		body = fmt.Sprintf(`{"client":%q,"ref":%q}`, clientTag, ref) // attribute this install to the referrer
 	}
 	resp := post(api+"/v1/register", body)
 	if resp == "" {
@@ -648,7 +652,7 @@ func sanitizeRef(s string) string {
 }
 
 func serve(api, pub, category, nonce string) string {
-	payload := fmt.Sprintf(`{"publisher_id":%q,"category":%q,"nonce":%q}`, pub, category, nonce)
+	payload := fmt.Sprintf(`{"publisher_id":%q,"category":%q,"nonce":%q,"client":%q}`, pub, category, nonce, clientTag)
 	return post(api+"/v1/serve", payload)
 }
 
