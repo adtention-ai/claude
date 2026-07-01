@@ -82,6 +82,8 @@ func main() {
 		cmdSetup(dir)
 	case "open":
 		cmdOpen(dir)
+	case "key":
+		cmdKey(dir)
 	}
 }
 
@@ -437,6 +439,40 @@ func cmdOpen(dir string) {
 	}
 	openURL(url)
 	fmt.Println("adtention: opened the current sponsor in your browser.")
+}
+
+// cmdKey prints this install's publisher_id + secret so the user can link it to their account and
+// claim its earnings on the portal. Read-only: it surfaces the existing local identity, it does not
+// register or change anything. Printing the secret is safe by design: it's the one-time claim proof,
+// and linking is write-once server-side (a claimed install can't be re-linked to another account),
+// so a secret later seen in the transcript is inert. Prints ONLY on this explicit invocation, never
+// in the status line or a hook.
+func cmdKey(dir string) {
+	var id struct {
+		PublisherID string `json:"publisher_id"`
+		Secret      string `json:"secret"`
+	}
+	if b, err := os.ReadFile(filepath.Join(dir, "identity.json")); err == nil {
+		json.Unmarshal(b, &id)
+	}
+	if id.PublisherID == "" || id.Secret == "" {
+		fmt.Println("adtention: no install identity yet. Open Claude Code and send one prompt to register your install, then run this again.")
+		return
+	}
+	// Show the cached balance so the user can confirm THIS is the install they mean before linking
+	// (e.g. when they run more than one install). Cache-fresh as of the last prompt; the server
+	// stays authoritative.
+	var balUSD float64
+	if bal := readFile(filepath.Join(dir, "balance")); bal != "" {
+		fmt.Sscanf(bal, "%f", &balUSD)
+	}
+	fmt.Println("Your ADtention publisher key. Link it to claim and cash out your earnings.")
+	fmt.Println()
+	fmt.Println("  publisher_id:  " + id.PublisherID)
+	fmt.Println("  secret:        " + id.Secret)
+	fmt.Printf("  balance:       $%.2f\n", balUSD)
+	fmt.Println()
+	fmt.Println("Link at:  https://app.adtention.ai/earn/link")
 }
 
 // openURL launches the default browser for u (best effort; errors are ignored).
