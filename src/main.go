@@ -84,6 +84,8 @@ func main() {
 		cmdOpen(dir)
 	case "key":
 		cmdKey(dir)
+	case "ref":
+		cmdRef(dir)
 	}
 }
 
@@ -473,6 +475,78 @@ func cmdKey(dir string) {
 	fmt.Printf("  balance:       $%.2f\n", balUSD)
 	fmt.Println()
 	fmt.Println("Link at:  https://app.adtention.ai/earn/link")
+}
+
+// refInvocation renders how to tell the user to re-run this command, tailored to the surface: the
+// /adtention:ref slash command inside Claude Code vs the bare `adtention ref` shell command
+// otherwise. The skill wrapper sets ADTENTION_SURFACE=claude explicitly (Claude Code text-substitutes
+// ${CLAUDE_PLUGIN_ROOT} but does NOT export it to the child env, so we can't detect it from that).
+func refInvocation() string {
+	if os.Getenv("ADTENTION_SURFACE") == "claude" {
+		return "/adtention:ref"
+	}
+	return "adtention ref"
+}
+
+// cmdRef attaches a referral code to THIS install after the fact — for a developer who installed
+// without going through their referrer's invite link (or installed first and got the code later).
+// It never re-registers and never touches the balance or identity: it only calls the server's
+// once-only /v1/account/refer with the cached publisher_id + secret. The server is non-retroactive,
+// so only future impressions accrue. `dir` is the cache dir; os.Args[2] is the referrer's code.
+func cmdRef(dir string) {
+	if len(os.Args) < 3 {
+		fmt.Println("adtention: give me the referral code, like: " + refInvocation() + " <code>")
+		return
+	}
+	code := sanitizeRef(os.Args[2])
+	if code == "" {
+		fmt.Println("adtention: that doesn't look like a referral code. Copy it from your invite link (adtention.ai/r/CODE), then run " + refInvocation() + " <code>")
+		return
+	}
+	// Read the cached install identity (publisher_id + secret). Direct read: attaching a referrer
+	// is only meaningful for an install that has already registered.
+	var id struct {
+		PublisherID string `json:"publisher_id"`
+		Secret      string `json:"secret"`
+	}
+	if b, err := os.ReadFile(filepath.Join(dir, "identity.json")); err == nil {
+		json.Unmarshal(b, &id)
+	}
+	if id.PublisherID == "" || id.Secret == "" {
+		fmt.Println("adtention: no install yet. Open Claude Code and send one prompt to register this install, then run " + refInvocation() + " " + code)
+		return
+	}
+	resp := post(apiURL()+"/v1/account/refer",
+		fmt.Sprintf(`{"publisher_id":%q,"secret":%q,"ref":%q}`, id.PublisherID, id.Secret, code))
+	if resp == "" {
+		fmt.Println("adtention: couldn't reach ADtention. Check your connection and try again.")
+		return
+	}
+	var out struct {
+		OK    bool   `json:"ok"`
+		Error string `json:"error"`
+	}
+	json.Unmarshal([]byte(resp), &out)
+	if out.OK {
+		fmt.Println("adtention: referrer attached. Your referral bonus is now active on every impression you serve from here on. Your publisher ID and balance are unchanged.")
+		return
+	}
+	// The endpoint validates that the code belongs to a real publisher, so a typo lands in
+	// unknown_ref here rather than silently doing nothing. Map each guard to plain guidance.
+	switch out.Error {
+	case "already_referred":
+		fmt.Println("adtention: this install already has a referrer, and that can't be changed.")
+	case "unknown_ref":
+		fmt.Println("adtention: no referrer found for code \"" + code + "\". Double-check it against your invite link and try again.")
+	case "reciprocal_ref":
+		fmt.Println("adtention: you can't set someone you referred as your own referrer.")
+	case "bad_secret":
+		fmt.Println("adtention: this install's key didn't verify. Reinstall the plugin to re-establish it, then try again.")
+	case "unknown_publisher":
+		fmt.Println("adtention: this install isn't registered yet. Send one prompt in Claude Code, then try again.")
+	default:
+		fmt.Println("adtention: couldn't attach the referrer right now. Please try again in a bit.")
+	}
 }
 
 // openURL launches the default browser for u (best effort; errors are ignored).
