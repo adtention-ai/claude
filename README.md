@@ -90,7 +90,23 @@ the sponsor line.
 - An idle terminal earns nothing. Leaving Claude open overnight generates zero impressions —
   no farming, no gaming it.
 - Your balance accrues to your install and shows live in the status line.
-- Once it passes a threshold (currently **$10**), you attach a payout method and withdraw.
+- Once it passes a threshold (currently **$10**), link your install to a free account and
+  withdraw. See [Cash out your earnings](#cash-out-your-earnings).
+
+## Cash out your earnings
+
+Earning needs no account. Withdrawing does, so you cash out by linking this install to a free
+ADtention account (Google sign-in). In Claude Code, run:
+
+```
+/link
+```
+
+It prints your `publisher_id` and `secret`; paste them at
+[app.adtention.ai/earn/link](https://app.adtention.ai/earn/link), then sign in with Google. Your
+balance is then tied to your account and withdrawable past the threshold. Linking is one-time
+(the install can't be moved to another account afterward), so a secret seen after linking can't
+be used to steal it.
 
 It's not a salary. It's beer money that shows up for work you were doing regardless.
 
