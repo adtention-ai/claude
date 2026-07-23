@@ -84,6 +84,8 @@ func main() {
 		cmdOpen(dir)
 	case "key":
 		cmdKey(dir)
+	case "kimi":
+		cmdKimi(os.Args[2:])
 	}
 }
 
