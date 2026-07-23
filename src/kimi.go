@@ -338,7 +338,7 @@ func kimiDrawAd(st *kimiState, out *os.File, rows, cols int) {
 	line := "\x1b7" + // save cursor
 		fmt.Sprintf("\x1b[%d;1H", rows) + // jump to real last row
 		"\x1b[2K" + // clear it
-		"\x1b[2m" + prefix + ad + suffix + "\x1b[0m" +
+		prefix + ad + "\x1b[2m" + suffix + "\x1b[0m" +
 		"\x1b8" // restore cursor
 	out.WriteString(line)
 }
