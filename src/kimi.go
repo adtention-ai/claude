@@ -87,7 +87,6 @@ type kimiCache struct {
 	Sponsor    *kimiSponsor `json:"sponsor"`
 	Balance    float64      `json:"balance"`
 	ServeCount int          `json:"serve_count"`
-	Linked     bool         `json:"linked"`
 }
 
 type kimiState struct {
@@ -98,14 +97,13 @@ type kimiState struct {
 	house     bool
 	houseIdx  int
 	publisher string
-	linked    bool
 	lastServe time.Time
 }
 
 func (s *kimiState) writeCacheLocked() {
 	// The house unit's URL is never cached: it embeds the secret and the cache
 	// file is not 0600 (the identity file is).
-	b, err := json.Marshal(kimiCache{Sponsor: s.sponsor, Balance: s.balance, ServeCount: s.count, Linked: s.linked})
+	b, err := json.Marshal(kimiCache{Sponsor: s.sponsor, Balance: s.balance, ServeCount: s.count})
 	if err != nil {
 		return
 	}
@@ -175,7 +173,6 @@ func kimiApplyServe(st *kimiState, resp string) bool {
 		BalanceUSD   float64 `json:"balance_usd"`
 		ClickURL     string  `json:"click_url"`
 		ImpressionID string  `json:"impression_id"`
-		Linked       *bool   `json:"linked"`
 	}
 	if json.Unmarshal([]byte(resp), &data) != nil {
 		return false
@@ -183,9 +180,6 @@ func kimiApplyServe(st *kimiState, resp string) bool {
 	st.mu.Lock()
 	defer st.mu.Unlock()
 	st.house = false // a fresh sponsor replaces the connect unit
-	if data.Linked != nil {
-		st.linked = *data.Linked
-	}
 	if data.BalanceUSD > st.balance {
 		st.balance = data.BalanceUSD // floor: never visually wipe a shown balance
 	}
@@ -314,19 +308,13 @@ func kimiOSC8(url, text string) string {
 //	⊕ $0.03  Connect your account → ctrl+e        (house slot)
 func kimiDrawAd(st *kimiState, out *os.File, rows, cols int) {
 	st.mu.Lock()
-	sponsor, balance, house, houseIdx, linked := st.sponsor, st.balance, st.house, st.houseIdx, st.linked
+	sponsor, balance, house, houseIdx := st.sponsor, st.balance, st.house, st.houseIdx
 	st.mu.Unlock()
 
 	var adText, url, key string
 	switch {
 	case house:
-		// Once the server says this install is claimed, the "Connect" nudge is
-		// retired and the rotation continues over the remaining variants.
-		lines := kimiHouseLines
-		if linked {
-			lines = kimiHouseLines[1:]
-		}
-		adText, url, key = lines[houseIdx%len(lines)], "", "ctrl+e"
+		adText, url, key = kimiHouseLines[houseIdx%len(kimiHouseLines)], "", "ctrl+e"
 	case sponsor != nil:
 		adText, url, key = sponsor.Text, sponsor.URL, "ctrl+g"
 	default:
@@ -386,7 +374,6 @@ func cmdKimi(args []string) {
 		var c kimiCache
 		if json.Unmarshal(b, &c) == nil {
 			st.sponsor, st.balance, st.count = c.Sponsor, c.Balance, c.ServeCount
-			st.linked = c.Linked
 		}
 	}
 	// 2. Register ahead of the first prompt (non-billable).
